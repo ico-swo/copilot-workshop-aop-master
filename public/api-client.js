@@ -81,6 +81,15 @@ export const api = {
     cancel: (id, body, version) => send("POST", `/api/purchase-orders/${id}/cancel`, { body, version }),
   },
 
+  stockRequests: {
+    list: (params) => send("GET", `/api/stock-requests?${params}`),
+    create: (body) => send("POST", "/api/stock-requests", { body }),
+    transitions: () => send("GET", "/api/stock-requests/transitions"),
+    approve: (id, version) => send("POST", `/api/stock-requests/${id}/approve`, { version }),
+    reject: (id, body, version) => send("POST", `/api/stock-requests/${id}/reject`, { body, version }),
+    cancel: (id, version) => send("POST", `/api/stock-requests/${id}/cancel`, { version }),
+  },
+
   audit: {
     list: (params) => send("GET", `/api/audit-events?${params}`),
     forEntity: (type, id) => send("GET", `/api/audit-events/${type}/${id}`),

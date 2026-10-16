@@ -36,6 +36,7 @@ const state = {
   parts: [],
   warehouses: [],
   transitions: {},
+  stockRequestTransitions: {},
 };
 
 function toast(message, kind = "info") {
@@ -60,10 +61,11 @@ function debounce(fn, delay) {
 /* -------------------------------------------------------- reference data */
 
 async function loadReferenceData() {
-  const [suppliers, parts, transitions] = await Promise.allSettled([
+  const [suppliers, parts, transitions, stockRequestTransitions] = await Promise.allSettled([
     api.suppliers.options(),
     api.parts.options(),
     api.orders.transitions(),
+    api.stockRequests.transitions(),
   ]);
   if (suppliers.status === "fulfilled") state.suppliers = suppliers.value.items;
   if (parts.status === "fulfilled") {
@@ -71,6 +73,7 @@ async function loadReferenceData() {
     state.warehouses = parts.value.warehouses;
   }
   if (transitions.status === "fulfilled") state.transitions = transitions.value;
+  if (stockRequestTransitions.status === "fulfilled") state.stockRequestTransitions = stockRequestTransitions.value;
 }
 
 const supplierOptions = () => state.suppliers.map((s) => ({ value: s.id, label: `${s.code} — ${s.name}` }));
@@ -456,6 +459,91 @@ function transitionOrder(order, action, label) {
   });
 }
 
+/* ---------------------------------------------------- stock request actions */
+
+function createStockRequest() {
+  openForm({
+    title: "New stock request",
+    submitLabel: "Raise request",
+    extra: () =>
+      element("div", { class: "callout" }, [
+        element("p", { text: "Stock is drawn only when an operator approves the request." }),
+        element("p", { class: "callout-muted", text: "Leave Requested by empty to raise it in your own name." }),
+      ]),
+    fields: [
+      {
+        name: "partId",
+        label: "Part",
+        type: "select",
+        wide: true,
+        allowEmpty: true,
+        emptyLabel: "— select a part —",
+        options: state.parts.map((p) => ({ value: p.id, label: `${p.sku} — ${p.name} (${p.stockQuantity} in stock)` })),
+      },
+      { name: "quantity", label: "Quantity", type: "number" },
+      { name: "requestedBy", label: "Requested by", nullable: true },
+      { name: "jobReference", label: "Job reference", nullable: true },
+      { name: "note", label: "Note", type: "textarea", wide: true, nullable: true, rows: 2 },
+    ],
+    onSubmit: (payload) => api.stockRequests.create(payload),
+    onSuccess: (created) => {
+      toast(`${created.reference} raised`);
+      refresh();
+    },
+  });
+}
+
+function approveStockRequest(request) {
+  confirmAction({
+    title: `Approve ${request.reference}?`,
+    message: `This draws ${request.quantity} unit(s) of ${request.part?.sku ?? "the part"} from stock. Availability is re-checked on approval.`,
+    confirmLabel: "Approve",
+    onConfirm: async () => {
+      const updated = await api.stockRequests.approve(request.id, request.version);
+      toast(`${updated.reference} approved — stock updated`);
+      await loadReferenceData();
+      refresh();
+    },
+  });
+}
+
+function rejectStockRequest(request) {
+  openForm({
+    title: `Reject ${request.reference}`,
+    submitLabel: "Reject request",
+    fields: [{ name: "reason", label: "Reason", type: "textarea", wide: true, rows: 3, hint: "Recorded in the audit trail" }],
+    onSubmit: (payload) => api.stockRequests.reject(request.id, payload, request.version),
+    onSuccess: (rejected) => {
+      toast(`${rejected.reference} rejected`);
+      refresh();
+    },
+  });
+}
+
+function cancelStockRequest(request) {
+  confirmAction({
+    title: `Cancel ${request.reference}?`,
+    message: "Only the person who requested it may cancel it.",
+    confirmLabel: "Cancel request",
+    danger: true,
+    onConfirm: async () => {
+      const cancelled = await api.stockRequests.cancel(request.id, request.version);
+      toast(`${cancelled.reference} cancelled`);
+      refresh();
+    },
+  });
+}
+
+/** Write actions allowed by the served state machine and the caller's capabilities. */
+function stockRequestActions(request) {
+  const allowed = state.stockRequestTransitions[request.status] ?? [];
+  return [
+    state.me.can.write && allowed.includes("approved") && { label: "Approve", variant: "primary", onClick: () => approveStockRequest(request) },
+    state.me.can.write && allowed.includes("rejected") && { label: "Reject", onClick: () => rejectStockRequest(request) },
+    state.me.can.write && allowed.includes("cancelled") && { label: "Cancel", variant: "danger", onClick: () => cancelStockRequest(request) },
+  ];
+}
+
 /* ---------------------------------------------------------- detail drawers */
 
 async function historyFor(entityType, entityId) {
@@ -607,6 +695,29 @@ async function showOrder(order) {
 
 /* ----------------------------------------------------------- view configs */
 
+async function showStockRequest(request) {
+  openDrawer({
+    title: request.reference,
+    subtitle: `${request.status} · ${request.part ? `${request.part.sku} — ${request.part.name}` : "Unknown part"}`,
+    sections: [
+      definitionList([
+        ["Part", request.part ? `${request.part.sku} — ${request.part.name}` : "Unknown"],
+        ["Quantity", `${request.quantity} units`],
+        ["Status", request.status],
+        ["Requested by", request.requestedBy],
+        ["Job reference", request.jobReference ?? "None"],
+        ["Note", request.note ?? "None"],
+        ["Decided by", request.decidedBy ?? "Pending"],
+        ["Decided", request.decidedAt ? dateTime.format(new Date(request.decidedAt)) : null],
+        ["Created", dateTime.format(new Date(request.createdAt))],
+        ["Version", request.version],
+      ]),
+      await historyFor("stock_request", request.id),
+    ],
+    actions: stockRequestActions(request),
+  });
+}
+
 const activeFilter = {
   type: "select",
   key: "active",
@@ -743,7 +854,33 @@ const VIEWS = {
       { label: "Entity", render: (row) => row.entityType },
       { label: "Summary", wide: true, render: (row) => row.summary },
     ],
-    controls: [{ type: "select", key: "entityType", label: "All entities", options: () => ["part", "supplier", "purchase_order"] }],
+    controls: [{ type: "select", key: "entityType", label: "All entities", options: () => ["part", "supplier", "purchase_order", "stock_request"] }],
+  },
+
+  stockRequests: {
+    title: "Stock requests",
+    fetch: (params) => {
+      const scoped = new URLSearchParams(params);
+      scoped.set("sort", "createdAt");
+      scoped.set("direction", "desc");
+      return api.stockRequests.list(scoped);
+    },
+    onRowClick: showStockRequest,
+    create: { label: "New request", run: createStockRequest },
+    columns: [
+      { label: "Reference", render: (row) => row.reference },
+      { label: "Part", render: (row) => (row.part ? `${row.part.sku} — ${row.part.name}` : "—") },
+      { label: "Qty", numeric: true, render: (row) => String(row.quantity) },
+      { label: "Status", badge: true, render: (row) => row.status },
+      { label: "Requested by", render: (row) => row.requestedBy },
+      { label: "Job", render: (row) => row.jobReference },
+      { label: "Created", render: (row) => dateTime.format(new Date(row.createdAt)) },
+    ],
+    rowActions: stockRequestActions,
+    controls: [
+      { type: "select", key: "status", label: "All statuses", options: () => Object.keys(state.stockRequestTransitions) },
+      { type: "select", key: "partId", label: "All parts", options: () => state.parts.map((p) => ({ value: p.id, label: p.sku })) },
+    ],
   },
 };
 

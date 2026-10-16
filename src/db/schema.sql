@@ -100,5 +100,23 @@ CREATE TABLE IF NOT EXISTS audit_events (
 CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_events (entity_type, entity_id);
 CREATE INDEX IF NOT EXISTS idx_audit_occurred ON audit_events (occurred_at DESC);
 
--- Lab 2: the stock_requests table is created by the migration you add when you
--- implement the stock request module. See docs/spec-stock-requests.md.
+-- ----------------------------------------------------------- stock requests
+-- Technician draws parts from a warehouse; approval decrements stock.
+-- See docs/spec-stock-requests.md.
+CREATE TABLE IF NOT EXISTS stock_requests (
+  id            TEXT PRIMARY KEY,
+  reference     TEXT NOT NULL UNIQUE,
+  part_id       TEXT NOT NULL REFERENCES parts (id) ON DELETE RESTRICT,
+  quantity      INTEGER NOT NULL CHECK (quantity > 0 AND quantity <= 500),
+  requested_by  TEXT NOT NULL,
+  job_reference TEXT,
+  status        TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled')),
+  note          TEXT,
+  decided_by    TEXT,
+  version       INTEGER NOT NULL DEFAULT 1,
+  created_at    TEXT NOT NULL,
+  decided_at    TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_stock_requests_status ON stock_requests (status);
+CREATE INDEX IF NOT EXISTS idx_stock_requests_part ON stock_requests (part_id);

@@ -3,6 +3,7 @@ import { sendJson } from "./http/respond.ts";
 import type { RouteDefinition } from "./http/router.ts";
 import { CATEGORIES, ADJUSTMENT_REASONS } from "./modules/parts/schema.ts";
 import { PO_STATUSES } from "./modules/purchase-orders/schema.ts";
+import { STOCK_REQUEST_STATUSES } from "./modules/stock-requests/schema.ts";
 
 /**
  * Hand-maintained OpenAPI description, served from the running process so it
@@ -120,6 +121,51 @@ function document() {
       },
       "/api/purchase-orders/{id}/receive": { post: { tags: ["Purchase orders"], summary: "Goods receipt; increases stock transactionally", parameters: [idParam, ifMatch], responses: ok("Received") } },
       "/api/purchase-orders/{id}/cancel": { post: { tags: ["Purchase orders"], summary: "Cancel with a reason", parameters: [idParam, ifMatch], responses: ok("Cancelled") } },
+      "/api/stock-requests": {
+        get: {
+          tags: ["Stock requests"],
+          summary: "List stock requests",
+          parameters: [
+            ...listParams,
+            { name: "status", in: "query", schema: { type: "string", enum: STOCK_REQUEST_STATUSES } },
+            { name: "partId", in: "query", schema: { type: "string" } },
+          ],
+          responses: ok("A page of stock requests"),
+        },
+        post: {
+          tags: ["Stock requests"],
+          summary: "Raise a stock request (operator)",
+          responses: { "201": { description: "Created" }, "400": { description: "Unknown or inactive part" }, "409": { description: "Insufficient stock" } },
+        },
+      },
+      "/api/stock-requests/transitions": { get: { tags: ["Stock requests"], summary: "Allowed state transitions", responses: ok("Status map") } },
+      "/api/stock-requests/{id}": {
+        get: { tags: ["Stock requests"], summary: "Get a stock request", parameters: [idParam], responses: { "200": { description: "A stock request" }, "404": { description: "Not found" } } },
+      },
+      "/api/stock-requests/{id}/approve": {
+        post: {
+          tags: ["Stock requests"],
+          summary: "Approve and decrement stock transactionally (operator)",
+          parameters: [idParam, ifMatch],
+          responses: { "200": { description: "Approved" }, "409": { description: "Insufficient stock or already resolved" }, "412": { description: "Version conflict" } },
+        },
+      },
+      "/api/stock-requests/{id}/reject": {
+        post: {
+          tags: ["Stock requests"],
+          summary: "Reject with a reason (operator)",
+          parameters: [idParam, ifMatch],
+          responses: { "200": { description: "Rejected" }, "409": { description: "Already resolved" }, "412": { description: "Version conflict" } },
+        },
+      },
+      "/api/stock-requests/{id}/cancel": {
+        post: {
+          tags: ["Stock requests"],
+          summary: "Cancel your own pending request (operator)",
+          parameters: [idParam, ifMatch],
+          responses: { "200": { description: "Cancelled" }, "403": { description: "Not the requester" }, "409": { description: "Already resolved" } },
+        },
+      },
       "/api/audit-events": { get: { tags: ["Audit"], summary: "Change history (operator)", parameters: listParams, responses: ok("A page of events") } },
       "/api/audit-events/{entityType}/{entityId}": { get: { tags: ["Audit"], summary: "History for one entity", responses: ok("Events") } },
     },
