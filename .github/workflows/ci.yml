@@ -1,46 +1,39 @@
 name: CI
 
 on:
-  pull_request:
-    branches: [main]
   push:
     branches: [main]
-
-# Read-only token: this workflow only checks out code and runs checks.
-permissions:
-  contents: read
-
-# A newer push to the same branch or PR supersedes the running check.
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  pull_request:
+    branches: [main]
 
 jobs:
   build-and-test:
-    name: Typecheck and test
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Node from package.json engines
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          # Resolves engines.node (>=24.0.0). Node 24 is required for
-          # node:sqlite and native TypeScript type stripping.
-          node-version-file: package.json
-          cache: npm
+          node-version: '24'
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
 
-      - name: Show Node version
-        run: node --version
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Test
-        run: npm test
+  deploy:
+    needs: build-and-test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - uses: azure/webapps-deploy@v3
+        with:
+          app-name: astra-copilot
+          package: 
