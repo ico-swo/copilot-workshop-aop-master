@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { createRouter, type RouteDefinition } from "./http/router.ts";
+import { healthRoutes } from "./http/health.ts";
 import { staticRoutes } from "./http/static.ts";
 import { AuditService } from "./modules/audit/service.ts";
 import { auditRoutes } from "./modules/audit/routes.ts";
@@ -14,7 +15,6 @@ import { openApiRoutes } from "./openapi.ts";
  * Builds the request handler for a given database. Tests call this with an
  * in-memory database, so no test touches the real data file.
  *
- * Lab 1: the /health route is added here.
  * Lab 2: register stockRequestRoutes(db, audit) here once the module exists.
  */
 export function createApp(db: DatabaseSync) {
@@ -28,6 +28,7 @@ export function createApp(db: DatabaseSync) {
     ...auditRoutes(audit),
     ...authRoutes(auth),
     ...openApiRoutes(),
+    ...healthRoutes(),
     ...staticRoutes(),
   ];
 

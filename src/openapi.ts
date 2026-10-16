@@ -30,6 +30,31 @@ function document() {
     servers: [{ url: "/", description: "This instance" }],
     security: [{ bearerAuth: [] }],
     paths: {
+      "/health": {
+        get: {
+          tags: ["Service"],
+          summary: "Service liveness and version (public)",
+          security: [],
+          responses: {
+            "200": {
+              description: "Service is running",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    required: ["status", "version", "uptimeSeconds"],
+                    properties: {
+                      status: { type: "string", enum: ["ok"] },
+                      version: { type: "string", example: "1.0.0" },
+                      uptimeSeconds: { type: "integer", minimum: 0, example: 42 },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
       "/api/me": { get: { tags: ["Session"], summary: "Describe the caller and what they may do", responses: ok("Caller and capabilities") } },
       "/api/parts": {
         get: {
